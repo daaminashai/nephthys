@@ -19,6 +19,7 @@ from nephthys.utils.env import env
 from nephthys.utils.logging import send_heartbeat
 from nephthys.utils.permissions import can_resolve
 from nephthys.utils.ticket_methods import reply_to_ticket
+from nephthys.utils.ticket_summary import generate_ticket_summary
 
 THREAD_CREDIT_CUTOFF = timedelta(hours=48)
 
@@ -154,6 +155,12 @@ async def resolve(
 
     # Keep the thread in the tickets channel (helper discussion is worth saving)
     # and turn its top message into a summary of the resolved ticket
+    summary = await generate_ticket_summary(
+        client,
+        msg_ts=tkt.msg_ts,
+        ticket_ts=tkt.ticket_ts,
+        author_slack_id=tkt.opened_by.slack_id,
+    )
     try:
         await client.chat_update(
             channel=env.slack_ticket_channel,
@@ -163,7 +170,7 @@ async def resolve(
                 author_user_id=tkt.opened_by.slack_id,
                 resolver_user_id=resolving_user.slack_id,
                 msg_ts=tkt.msg_ts,
-                title=tkt.title,
+                summary=summary or tkt.title,
                 description=tkt.description,
                 stale=stale,
             ),

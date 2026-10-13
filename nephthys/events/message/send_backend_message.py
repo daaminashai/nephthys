@@ -85,7 +85,7 @@ def resolved_backend_message_blocks(
     author_user_id: str,
     resolver_user_id: str,
     msg_ts: str,
-    title: str | None,
+    summary: str | None,
     description: str,
     stale: bool = False,
 ) -> list[dict]:
@@ -106,8 +106,8 @@ def resolved_backend_message_blocks(
     )
 
     blocks = []
-    if title:
-        blocks.append(Section(f"*{title}*"))
+    if summary:
+        blocks.append(Section(f"*{summary}*"))
     blocks.append(Section(quoted_question or "> _(no text)_"))
     blocks.append(
         Context(
