@@ -181,7 +181,7 @@ async def send_backend_message(
             await client.chat_postMessage(
                 channel=env.slack_ticket_channel,
                 thread_ts=ticket_ts,
-                text=description,
+                text=f"*Original message:*\n{description}",
                 username=display_name,
                 icon_url=profile_pic,
             )

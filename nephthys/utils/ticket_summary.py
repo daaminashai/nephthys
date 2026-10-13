@@ -63,9 +63,10 @@ async def generate_ticket_summary(
                     "content": (
                         "You are a helpful assistant that helps organise tickets for Hack Club's support team. "
                         "You're going to read a resolved support ticket: the public help thread, and the helpers' internal discussion about it. "
-                        "Write the conclusion that was reached - the answer given or the decision made - not the topic of the question. "
-                        "If nothing was concluded, say what's still pending. "
-                        "Use no more than 8 words, but as few as possible. "
+                        "Write it as '<topic>: <conclusion>'. The topic names what was asked about in 1-4 words, so the summary makes sense on its own. "
+                        "The conclusion is what was reached - the answer given or the decision made. If nothing was concluded, say what's still pending. "
+                        "For example: 'Need-based stipends: not offered yet, maybe later' or 'Pre-Taiyaki hours: count with 5+ new hours'. "
+                        "Use no more than 10 words in total, but as few as possible. "
                         "Return nothing else. Use sentence case, no quote marks, no trailing full stop, and don't name people. "
                         "Be aware, you cannot see uploaded attachments."
                     ),
@@ -75,7 +76,7 @@ async def generate_ticket_summary(
                     "content": (
                         f"Public help thread:\n{help_thread or '(empty)'}\n\n"
                         f"Internal helper discussion:\n{discussion_thread or '(none)'}\n\n"
-                        "What was the conclusion?"
+                        "Summarise the topic and conclusion."
                     ),
                 },
             ],
