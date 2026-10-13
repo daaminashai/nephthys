@@ -116,7 +116,7 @@ def resolved_backend_message_blocks(
         else f"Resolved by <@{resolver_user_id}>"
     )
     return [
-        Section(f"*{summary}*").build(),
+        Section(f"*Summary:* {summary}").build(),
         Context(
             [
                 Text(
