@@ -1,8 +1,14 @@
+from blockkit import Context
+from blockkit import Section
+from blockkit import Text
 from slack_sdk.web.async_client import AsyncWebClient
 
 from nephthys.database.tables import CategoryTag
 from nephthys.database.tables import User
 from nephthys.utils.env import env
+
+# Section blocks are capped at 3000 characters, so leave room for the quote markers
+MAX_RESOLVED_QUESTION_LENGTH = 2500
 
 
 async def backend_message_blocks(
@@ -73,6 +79,46 @@ async def backend_message_blocks(
             ],
         },
     ]
+
+
+def resolved_backend_message_blocks(
+    author_user_id: str,
+    resolver_user_id: str,
+    msg_ts: str,
+    title: str | None,
+    description: str,
+    stale: bool = False,
+) -> list[dict]:
+    """Blocks that replace the backend message once its ticket is resolved.
+
+    The thread in the tickets channel is kept, so this turns the top message
+    into a summary of the ticket instead of the tag dropdowns.
+    """
+    thread_url = f"https://hackclub.slack.com/archives/{env.slack_help_channel}/p{msg_ts.replace('.', '')}"
+    question = description
+    if len(question) > MAX_RESOLVED_QUESTION_LENGTH:
+        question = question[:MAX_RESOLVED_QUESTION_LENGTH] + "…"
+    quoted_question = "\n".join(f"> {line}" for line in question.splitlines())
+    resolved_by = (
+        "Closed automatically for being stale"
+        if stale
+        else f"Resolved by <@{resolver_user_id}>"
+    )
+
+    blocks = []
+    if title:
+        blocks.append(Section(f"*{title}*"))
+    blocks.append(Section(quoted_question or "> _(no text)_"))
+    blocks.append(
+        Context(
+            [
+                Text(
+                    f":white_check_mark: {resolved_by}. Submitted by <@{author_user_id}>. <{thread_url}|View thread>."
+                )
+            ]
+        )
+    )
+    return [block.build() for block in blocks]
 
 
 def backend_message_fallback_text(
