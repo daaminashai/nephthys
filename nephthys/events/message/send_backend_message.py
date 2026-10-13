@@ -1,19 +1,34 @@
+import logging
+
 from blockkit import Context
 from blockkit import Section
 from blockkit import Text
+from slack_sdk.errors import SlackApiError
 from slack_sdk.web.async_client import AsyncWebClient
 
 from nephthys.database.tables import CategoryTag
 from nephthys.database.tables import User
 from nephthys.utils.env import env
 
-# Section blocks are capped at 3000 characters, so leave room for the quote markers
-MAX_RESOLVED_QUESTION_LENGTH = 2500
+QUESTION_PREVIEW_LENGTH = 100
+
+
+def question_preview(description: str) -> str:
+    """A one-line preview of the question, cut to QUESTION_PREVIEW_LENGTH characters"""
+    preview = " ".join(description.split())
+    if len(preview) <= QUESTION_PREVIEW_LENGTH:
+        return preview
+    preview = preview[:QUESTION_PREVIEW_LENGTH]
+    # Don't cut a Slack mention or link like <@U123> in half
+    if preview.rfind("<") > preview.rfind(">"):
+        preview = preview[: preview.rfind("<")]
+    return preview.rstrip() + "…"
 
 
 async def backend_message_blocks(
     author_user_id: str,
     msg_ts: str,
+    description: str,
     past_tickets: int,
     current_category_tag_id: int | None = None,
     reopened_by: User | None = None,
@@ -54,6 +69,7 @@ async def backend_message_blocks(
         category_tags_dropdown["element"]["initial_option"] = initial_option
 
     return [
+        Section(question_preview(description) or "_(no text)_").build(),
         category_tags_dropdown,
         {
             "type": "input",
@@ -85,40 +101,30 @@ def resolved_backend_message_blocks(
     author_user_id: str,
     resolver_user_id: str,
     msg_ts: str,
-    summary: str | None,
-    description: str,
+    summary: str,
     stale: bool = False,
 ) -> list[dict]:
     """Blocks that replace the backend message once its ticket is resolved.
 
-    The thread in the tickets channel is kept, so this turns the top message
-    into a summary of the ticket instead of the tag dropdowns.
+    The thread in the tickets channel is kept (the full question is its first
+    reply), so the top message just becomes a short summary of the ticket.
     """
     thread_url = f"https://hackclub.slack.com/archives/{env.slack_help_channel}/p{msg_ts.replace('.', '')}"
-    question = description
-    if len(question) > MAX_RESOLVED_QUESTION_LENGTH:
-        question = question[:MAX_RESOLVED_QUESTION_LENGTH] + "…"
-    quoted_question = "\n".join(f"> {line}" for line in question.splitlines())
     resolved_by = (
         "Closed automatically for being stale"
         if stale
         else f"Resolved by <@{resolver_user_id}>"
     )
-
-    blocks = []
-    if summary:
-        blocks.append(Section(f"*{summary}*"))
-    blocks.append(Section(quoted_question or "> _(no text)_"))
-    blocks.append(
+    return [
+        Section(f"*{summary}*").build(),
         Context(
             [
                 Text(
                     f":white_check_mark: {resolved_by}. Submitted by <@{author_user_id}>. <{thread_url}|View thread>."
                 )
             ]
-        )
-    )
-    return [block.build() for block in blocks]
+        ).build(),
+    ]
 
 
 def backend_message_fallback_text(
@@ -144,13 +150,21 @@ async def send_backend_message(
     display_name: str | None = None,
     profile_pic: str | None = None,
 ):
-    """Send a "backend" message to the tickets channel with ticket details."""
+    """Send a "backend" message to the tickets channel with ticket details.
 
-    return await client.chat_postMessage(
+    The message itself only shows a preview of the question, so the full
+    question is posted as the first reply in its thread."""
+
+    response = await client.chat_postMessage(
         channel=env.slack_ticket_channel,
         text=backend_message_fallback_text(author_user_id, description, reopened_by),
         blocks=await backend_message_blocks(
-            author_user_id, msg_ts, past_tickets, current_category_tag_id, reopened_by
+            author_user_id=author_user_id,
+            msg_ts=msg_ts,
+            description=description,
+            past_tickets=past_tickets,
+            current_category_tag_id=current_category_tag_id,
+            reopened_by=reopened_by,
         ),
         username=display_name,
         icon_url=profile_pic,
@@ -158,6 +172,21 @@ async def send_backend_message(
             "event_type": "nephthys_ticket_message",
             "event_payload": {"source_user_id": author_user_id},
         },
-        unfurl_links=True,
-        unfurl_media=True,
+        # The full question is in the thread, so don't unfurl the "View thread" link
+        unfurl_links=False,
+        unfurl_media=False,
     )
+    if description and (ticket_ts := response.get("ts")):
+        try:
+            await client.chat_postMessage(
+                channel=env.slack_ticket_channel,
+                thread_ts=ticket_ts,
+                text=description,
+                username=display_name,
+                icon_url=profile_pic,
+            )
+        except SlackApiError as e:
+            logging.error(
+                f"Failed to post original question in ticket thread ticket_ts={ticket_ts}: {e.response['error']}"
+            )
+    return response

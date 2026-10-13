@@ -12,6 +12,7 @@ from slack_sdk.web.async_client import AsyncWebClient
 from nephthys.database.enums import TicketStatus
 from nephthys.database.tables import Ticket
 from nephthys.database.tables import User
+from nephthys.events.message.send_backend_message import question_preview
 from nephthys.events.message.send_backend_message import (
     resolved_backend_message_blocks,
 )
@@ -155,23 +156,27 @@ async def resolve(
 
     # Keep the thread in the tickets channel (helper discussion is worth saving)
     # and turn its top message into a summary of the resolved ticket
-    summary = await generate_ticket_summary(
-        client,
-        msg_ts=tkt.msg_ts,
-        ticket_ts=tkt.ticket_ts,
-        author_slack_id=tkt.opened_by.slack_id,
+    summary = (
+        await generate_ticket_summary(
+            client,
+            msg_ts=tkt.msg_ts,
+            ticket_ts=tkt.ticket_ts,
+            author_slack_id=tkt.opened_by.slack_id,
+        )
+        or tkt.title
+        or question_preview(tkt.description)
+        or "Resolved ticket"
     )
     try:
         await client.chat_update(
             channel=env.slack_ticket_channel,
             ts=tkt.ticket_ts,
-            text=f"Resolved ticket from <@{tkt.opened_by.slack_id}>: {tkt.description}",
+            text=f"Resolved: {summary}",
             blocks=resolved_backend_message_blocks(
                 author_user_id=tkt.opened_by.slack_id,
                 resolver_user_id=resolving_user.slack_id,
                 msg_ts=tkt.msg_ts,
-                summary=summary or tkt.title,
-                description=tkt.description,
+                summary=summary,
                 stale=stale,
             ),
         )

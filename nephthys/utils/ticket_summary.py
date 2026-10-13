@@ -65,7 +65,7 @@ async def generate_ticket_summary(
                         "You're going to read a resolved support ticket: the public help thread, and the helpers' internal discussion about it. "
                         "Write the conclusion that was reached - the answer given or the decision made - not the topic of the question. "
                         "If nothing was concluded, say what's still pending. "
-                        "Use no more than 12 words, but as few as possible. "
+                        "Use no more than 8 words, but as few as possible. "
                         "Return nothing else. Use sentence case, no quote marks, no trailing full stop, and don't name people. "
                         "Be aware, you cannot see uploaded attachments."
                     ),
