@@ -9,6 +9,11 @@ class Taiyaki(Transcript):
     help_channel: str = "C0C82QP81DW"
     ticket_channel: str = "C0C841V89DY"
     team_channel: str = "C0AKYAHUL73"
+    no_ping_resolvers: list[str] = [
+        "U07GLQY6UN4",  # daamin
+        "U0943NG73PA",  # julia
+        "U06U1CBK589",  # selena
+    ]
 
     faq_link: str = "https://hackclub.enterprise.slack.com/docs/T0266FRGM/F0C712C3SR5"
     identity_help_channel: str = "C092833JXKK"

@@ -1,11 +1,9 @@
-"""Write people's names in the tickets channel without pinging the helpers in it.
-
-Instead of <@mentions>, names are written out with one letter swapped for a
-lookalike from the Cyrillic alphabet, so they read the same but don't match
-anyone's mentions or highlight words."""
-
+# Write someone's name in a message without pinging them.
+#
+# The name is written out with one letter swapped for a lookalike from the
+# Cyrillic alphabet, so it reads the same but doesn't match their mentions or
+# highlight words.
 import logging
-import re
 
 from slack_sdk.errors import SlackApiError
 
@@ -32,10 +30,6 @@ LOOKALIKES = {
     "j": "ј",
 }
 
-USER_MENTION = re.compile(r"<@([UW][A-Z0-9]+)(?:\|[^>]*)?>")
-GROUP_MENTION = re.compile(r"<!subteam\^[A-Z0-9]+(?:\|@?([^>]*))?>")
-SPECIAL_MENTION = re.compile(r"<!(here|channel|everyone)(?:\|[^>]*)?>")
-
 # Display names rarely change, so cache them for the life of the process
 _name_cache: dict[str, str] = {}
 
@@ -58,17 +52,3 @@ async def unpinged_name(slack_id: str) -> str:
             logging.warning(f"Failed to get display name for slack_id={slack_id}: {e}")
             return "someone"
     return obfuscate_name(_name_cache[slack_id])
-
-
-async def strip_pings(text: str) -> str:
-    """Replaces user, group and @here/@channel mentions in a message (e.g. a
-    question being copied into the tickets channel) with unpinged names."""
-    names = {
-        slack_id: await unpinged_name(slack_id)
-        for slack_id in set(USER_MENTION.findall(text))
-    }
-    text = USER_MENTION.sub(lambda m: f"@{names[m.group(1)]}", text)
-    text = GROUP_MENTION.sub(
-        lambda m: f"@{obfuscate_name(m.group(1) or 'group')}", text
-    )
-    return SPECIAL_MENTION.sub(lambda m: f"@{obfuscate_name(m.group(1))}", text)

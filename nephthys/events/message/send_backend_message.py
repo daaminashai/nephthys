@@ -8,7 +8,6 @@ from slack_sdk.web.async_client import AsyncWebClient
 
 from nephthys.database.tables import User
 from nephthys.utils.env import env
-from nephthys.utils.no_ping import strip_pings
 from nephthys.utils.no_ping import unpinged_name
 
 QUESTION_PREVIEW_LENGTH = 100
@@ -33,11 +32,7 @@ def help_thread_url(msg_ts: str) -> str:
     return f"https://hackclub.slack.com/archives/{env.slack_help_channel}/p{msg_ts.replace('.', '')}"
 
 
-# Names in the tickets channel are written with `unpinged_name` rather than as
-# <@mentions>, so the helpers in it don't get pinged by every ticket
-
-
-async def backend_message_blocks(
+def backend_message_blocks(
     author_user_id: str,
     msg_ts: str,
     description: str,
@@ -45,16 +40,14 @@ async def backend_message_blocks(
     reopened_by: User | None = None,
 ) -> list[dict]:
     thread_url = help_thread_url(msg_ts)
-    author = await unpinged_name(author_user_id)
-    preview = question_preview(await strip_pings(description))
     return [
-        Section(preview or "_(no text)_").build(),
+        Section(question_preview(description) or "_(no text)_").build(),
         Context(
             [
                 Text(
-                    f"Reopened by {await unpinged_name(reopened_by.slack_id)}. Originally submitted by {author}. <{thread_url}|View thread>."
+                    f"Reopened by <@{reopened_by.slack_id}>. Originally submitted by <@{author_user_id}>. <{thread_url}|View thread>."
                     if reopened_by
-                    else f"Submitted by {author}. They have {past_tickets} past tickets. <{thread_url}|View thread>."
+                    else f"Submitted by <@{author_user_id}>. They have {past_tickets} past tickets. <{thread_url}|View thread>."
                 )
             ]
         ).build(),
@@ -84,25 +77,28 @@ async def resolved_thread_message_text(
     author_user_id: str, resolver_user_id: str, stale: bool = False
 ) -> str:
     """The reply posted at the end of the ticket's thread when it's resolved"""
-    resolved_by = (
-        "Closed automatically for being stale"
-        if stale
-        else f"Resolved by {await unpinged_name(resolver_user_id)}"
+    # Some helpers (see the transcript's `no_ping_resolvers`) don't want a ping
+    # every time they resolve a ticket, so their name is written out instead
+    resolver = (
+        await unpinged_name(resolver_user_id)
+        if resolver_user_id in env.transcript.no_ping_resolvers
+        else f"<@{resolver_user_id}>"
     )
-    return f":white_check_mark: {resolved_by}. Submitted by {await unpinged_name(author_user_id)}."
+    resolved_by = (
+        "Closed automatically for being stale" if stale else f"Resolved by {resolver}"
+    )
+    return f":white_check_mark: {resolved_by}. Submitted by <@{author_user_id}>."
 
 
-async def backend_message_fallback_text(
+def backend_message_fallback_text(
     author_user_id: str,
     description: str,
     reopened_by: User | None = None,
 ) -> str:
-    author = await unpinged_name(author_user_id)
-    description = await strip_pings(description)
     return (
-        f"Reopened ticket from {author}: {description}"
+        f"Reopened ticket from <@{author_user_id}>: {description}"
         if reopened_by
-        else f"New question from {author}: {description}"
+        else f"New question from <@{author_user_id}>: {description}"
     )
 
 
@@ -123,10 +119,8 @@ async def send_backend_message(
 
     response = await client.chat_postMessage(
         channel=env.slack_ticket_channel,
-        text=await backend_message_fallback_text(
-            author_user_id, description, reopened_by
-        ),
-        blocks=await backend_message_blocks(
+        text=backend_message_fallback_text(author_user_id, description, reopened_by),
+        blocks=backend_message_blocks(
             author_user_id=author_user_id,
             msg_ts=msg_ts,
             description=description,
@@ -148,7 +142,7 @@ async def send_backend_message(
             await client.chat_postMessage(
                 channel=env.slack_ticket_channel,
                 thread_ts=ticket_ts,
-                text=f"*Original message:*\n{await strip_pings(description)}",
+                text=f"*Original message:*\n{description}",
                 username=display_name,
                 icon_url=profile_pic,
             )
@@ -171,13 +165,11 @@ async def post_reopen_message(
 
     That reply is deleted when the ticket is resolved again, so a plain
     "reopened by" reply is posted below it to keep a record in the thread."""
-    reopener = await unpinged_name(reopened_by.slack_id)
-    preview = question_preview(await strip_pings(description))
     await client.chat_postMessage(
         channel=env.slack_ticket_channel,
         thread_ts=ticket_ts,
         reply_broadcast=True,
-        text=f":repeat: Reopened by {reopener}: {preview} <{help_thread_url(msg_ts)}|View thread>",
+        text=f":repeat: Reopened by <@{reopened_by.slack_id}>: {question_preview(description)} <{help_thread_url(msg_ts)}|View thread>",
         metadata={
             "event_type": REOPEN_MESSAGE_EVENT_TYPE,
             "event_payload": {"msg_ts": msg_ts},
@@ -188,7 +180,7 @@ async def post_reopen_message(
     await client.chat_postMessage(
         channel=env.slack_ticket_channel,
         thread_ts=ticket_ts,
-        text=f":repeat: Reopened by {reopener}.",
+        text=f":repeat: Reopened by <@{reopened_by.slack_id}>.",
     )
 
 

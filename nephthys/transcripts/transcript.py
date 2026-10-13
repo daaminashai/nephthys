@@ -34,6 +34,10 @@ class Transcript(BaseModel):
         default="",
         description="Message when ticket is reopened",
     )
+    no_ping_resolvers: list[str] = Field(
+        default=[],
+        description="Slack IDs of helpers whose name is written out (not pinged) in the tickets channel when they resolve a ticket",
+    )
 
     @property
     def program_snake_case(self) -> str:
