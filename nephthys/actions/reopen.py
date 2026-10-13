@@ -9,6 +9,9 @@ from nephthys.database.tables import Ticket
 from nephthys.database.tables import User
 from nephthys.errors.errors import PermissionDenied
 from nephthys.errors.errors import TicketNotClosedError
+from nephthys.events.message.send_backend_message import backend_message_blocks
+from nephthys.events.message.send_backend_message import backend_message_fallback_text
+from nephthys.events.message.send_backend_message import post_reopen_message
 from nephthys.events.message.send_backend_message import send_backend_message
 from nephthys.utils.env import env
 from nephthys.utils.logging import send_heartbeat
@@ -49,32 +52,62 @@ async def reopen(ticket: Ticket, reopened_by: User, client: AsyncWebClient):
 
     if not (author := await User.objects().get(User.id == ticket.opened_by)):
         raise ValueError("Cannot reopen ticket with no recorded author")
-    author_profile = await get_user_profile(author.slack_id)
     other_tickets = await Ticket.count().where(
         (Ticket.opened_by == ticket.opened_by) & (Ticket.id != ticket.id)
     )
 
-    backend_message = await send_backend_message(
-        author_user_id=author.slack_id,
-        description=ticket.description,
-        msg_ts=ticket.msg_ts,
-        past_tickets=other_tickets,
-        client=env.slack_client,
-        current_category_tag_id=ticket.category_tag,
-        reopened_by=reopened_by,
-        display_name=author_profile.display_name(),
-        profile_pic=author_profile.profile_pic_512x(),
-    )
+    # Reuse the ticket's existing thread in the tickets channel: put its top
+    # message back into the open state and post a "reopened" reply that's also
+    # sent to the channel so helpers notice it
+    try:
+        await env.slack_client.chat_update(
+            channel=env.slack_ticket_channel,
+            ts=ticket.ticket_ts,
+            text=backend_message_fallback_text(
+                author.slack_id, ticket.description, reopened_by
+            ),
+            blocks=backend_message_blocks(
+                author_user_id=author.slack_id,
+                msg_ts=ticket.msg_ts,
+                description=ticket.description,
+                past_tickets=other_tickets,
+                reopened_by=reopened_by,
+            ),
+        )
+        await post_reopen_message(
+            env.slack_client,
+            ticket_ts=ticket.ticket_ts,
+            msg_ts=ticket.msg_ts,
+            description=ticket.description,
+            reopened_by=reopened_by,
+        )
+        new_ticket_ts = ticket.ticket_ts
+    except SlackApiError as e:
+        if e.response["error"] != "message_not_found":
+            raise e
+        # Tickets resolved before threads were kept had their message deleted,
+        # so start a new thread for them instead
+        author_profile = await get_user_profile(author.slack_id)
+        backend_message = await send_backend_message(
+            author_user_id=author.slack_id,
+            description=ticket.description,
+            msg_ts=ticket.msg_ts,
+            past_tickets=other_tickets,
+            client=env.slack_client,
+            reopened_by=reopened_by,
+            display_name=author_profile.display_name(),
+            profile_pic=author_profile.profile_pic_512x(),
+        )
 
-    new_ticket_ts = backend_message["ts"]
-    if not new_ticket_ts:
-        logging.error(f"Invalid Slack message creation response: {backend_message}")
-        raise ValueError("Invalid Slack message creation response: no ts")
-    await Ticket.update(
-        {
-            Ticket.ticket_ts: new_ticket_ts,
-        }
-    ).where(Ticket.id == ticket.id)
+        new_ticket_ts = backend_message["ts"]
+        if not new_ticket_ts:
+            logging.error(f"Invalid Slack message creation response: {backend_message}")
+            raise ValueError("Invalid Slack message creation response: no ts")
+        await Ticket.update(
+            {
+                Ticket.ticket_ts: new_ticket_ts,
+            }
+        ).where(Ticket.id == ticket.id)
 
     try:
         await env.slack_client.reactions_remove(

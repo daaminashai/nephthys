@@ -12,9 +12,13 @@ from slack_sdk.web.async_client import AsyncWebClient
 from nephthys.database.enums import TicketStatus
 from nephthys.database.tables import Ticket
 from nephthys.database.tables import User
+from nephthys.events.message.send_backend_message import delete_reopen_messages
 from nephthys.events.message.send_backend_message import question_preview
 from nephthys.events.message.send_backend_message import (
     resolved_backend_message_blocks,
+)
+from nephthys.events.message.send_backend_message import (
+    resolved_thread_message_text,
 )
 from nephthys.utils.env import env
 from nephthys.utils.logging import send_heartbeat
@@ -172,14 +176,19 @@ async def resolve(
             channel=env.slack_ticket_channel,
             ts=tkt.ticket_ts,
             text=f"Resolved: {summary}",
-            blocks=resolved_backend_message_blocks(
+            blocks=resolved_backend_message_blocks(msg_ts=tkt.msg_ts, summary=summary),
+        )
+        await client.chat_postMessage(
+            channel=env.slack_ticket_channel,
+            thread_ts=tkt.ticket_ts,
+            text=resolved_thread_message_text(
                 author_user_id=tkt.opened_by.slack_id,
                 resolver_user_id=resolving_user.slack_id,
-                msg_ts=tkt.msg_ts,
-                summary=summary,
                 stale=stale,
             ),
         )
+        # If the ticket was reopened, its "reopened" reply is no longer needed
+        await delete_reopen_messages(client, tkt.ticket_ts)
     except SlackApiError as e:
         logging.error(
             f"Failed to update backend message for ticket with ts {ts}: {e.response['error']}"

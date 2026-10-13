@@ -16,8 +16,6 @@ from nephthys.database.tables import BotMessage
 from nephthys.database.tables import CategoryTag
 from nephthys.database.tables import Ticket
 from nephthys.database.tables import User
-from nephthys.events.message.send_backend_message import backend_message_blocks
-from nephthys.events.message.send_backend_message import backend_message_fallback_text
 from nephthys.events.message.send_backend_message import send_backend_message
 from nephthys.macros import run_macro
 from nephthys.utils.ai import ai_client
@@ -214,22 +212,6 @@ async def handle_new_question(
         "AI category tag generation", TICKET_CATEGORY_GENERATION_DURATION
     ):
         category_tag = await generate_category_tag(text)
-
-    if category_tag:
-        blocks = await backend_message_blocks(
-            author_user_id=author_id,
-            msg_ts=event["ts"],
-            description=text,
-            past_tickets=past_tickets,
-            current_category_tag_id=category_tag.id,
-        )
-
-        await client.chat_update(
-            channel=env.slack_ticket_channel,
-            ts=ticket_message_ts,
-            text=backend_message_fallback_text(author_id, text),
-            blocks=blocks,
-        )
 
     user_facing_message_ts = user_facing_message["ts"]
     if not user_facing_message_ts:

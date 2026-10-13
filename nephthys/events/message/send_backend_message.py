@@ -6,11 +6,13 @@ from blockkit import Text
 from slack_sdk.errors import SlackApiError
 from slack_sdk.web.async_client import AsyncWebClient
 
-from nephthys.database.tables import CategoryTag
 from nephthys.database.tables import User
 from nephthys.utils.env import env
 
 QUESTION_PREVIEW_LENGTH = 100
+# Marks the "reopened" replies broadcast to the tickets channel, so they can be
+# found and deleted once the ticket is resolved again
+REOPEN_MESSAGE_EVENT_TYPE = "nephthys_ticket_reopened"
 
 
 def question_preview(description: str) -> str:
@@ -25,106 +27,61 @@ def question_preview(description: str) -> str:
     return preview.rstrip() + "…"
 
 
-async def backend_message_blocks(
+def help_thread_url(msg_ts: str) -> str:
+    return f"https://hackclub.slack.com/archives/{env.slack_help_channel}/p{msg_ts.replace('.', '')}"
+
+
+def backend_message_blocks(
     author_user_id: str,
     msg_ts: str,
     description: str,
     past_tickets: int,
-    current_category_tag_id: int | None = None,
     reopened_by: User | None = None,
 ) -> list[dict]:
-    thread_url = f"https://hackclub.slack.com/archives/{env.slack_help_channel}/p{msg_ts.replace('.', '')}"
-    if current_category_tag_id is not None:
-        options = [
-            {
-                "text": {
-                    "type": "plain_text",
-                    "text": tag.name,
-                },
-                "value": f"{tag.id}",
-            }
-            for tag in await CategoryTag.objects()
-        ]
-        initial_option = [
-            option
-            for option in options
-            if option["value"] == f"{current_category_tag_id}"
-        ][0]
-    else:
-        initial_option = None
-    category_tags_dropdown = {
-        "type": "input",
-        "label": {"type": "plain_text", "text": "Category tag", "emoji": True},
-        "element": {
-            "type": "external_select",
-            "action_id": "category-tag-list",
-            "placeholder": {
-                "type": "plain_text",
-                "text": "Which category tag fits?",
-            },
-            "min_query_length": 0,
-        },
-    }
-    if initial_option:
-        category_tags_dropdown["element"]["initial_option"] = initial_option
-
+    thread_url = help_thread_url(msg_ts)
     return [
         Section(question_preview(description) or "_(no text)_").build(),
-        category_tags_dropdown,
-        {
-            "type": "input",
-            "label": {"type": "plain_text", "text": "Team tags", "emoji": True},
-            "element": {
-                "action_id": "team-tag-list",
-                "type": "multi_external_select",
-                "placeholder": {"type": "plain_text", "text": "Select tags"},
-                "min_query_length": 0,
-            },
-        },
-        {
-            "type": "context",
-            "elements": [
-                {
-                    "type": "mrkdwn",
-                    "text": (
-                        f"Reopened by <@{reopened_by.slack_id}>. Originally submitted by <@{author_user_id}>. <{thread_url}|View thread>."
-                        if reopened_by
-                        else f"Submitted by <@{author_user_id}>. They have {past_tickets} past tickets. <{thread_url}|View thread>."
-                    ),
-                }
-            ],
-        },
+        Context(
+            [
+                Text(
+                    f"Reopened by <@{reopened_by.slack_id}>. Originally submitted by <@{author_user_id}>. <{thread_url}|View thread>."
+                    if reopened_by
+                    else f"Submitted by <@{author_user_id}>. They have {past_tickets} past tickets. <{thread_url}|View thread>."
+                )
+            ]
+        ).build(),
     ]
 
 
-def resolved_backend_message_blocks(
-    author_user_id: str,
-    resolver_user_id: str,
-    msg_ts: str,
-    summary: str,
-    stale: bool = False,
-) -> list[dict]:
+def resolved_backend_message_blocks(msg_ts: str, summary: str) -> list[dict]:
     """Blocks that replace the backend message once its ticket is resolved.
 
     The thread in the tickets channel is kept (the full question is its first
-    reply), so the top message just becomes a short summary of the ticket.
+    reply and who resolved it is its last), so the top message just becomes a
+    short summary of the ticket.
     """
-    thread_url = f"https://hackclub.slack.com/archives/{env.slack_help_channel}/p{msg_ts.replace('.', '')}"
-    resolved_by = (
-        "Closed automatically for being stale"
-        if stale
-        else f"Resolved by <@{resolver_user_id}>"
-    )
     return [
         Section(f"*Summary:* {summary}").build(),
         Context(
             [
                 Text(
-                    f":white_check_mark: {resolved_by}. Submitted by <@{author_user_id}>. <{thread_url}|View thread>."
+                    f":white_check_mark: Resolved. <{help_thread_url(msg_ts)}|View thread>."
                 )
             ]
         ).build(),
     ]
+
+
+def resolved_thread_message_text(
+    author_user_id: str, resolver_user_id: str, stale: bool = False
+) -> str:
+    """The reply posted at the end of the ticket's thread when it's resolved"""
+    resolved_by = (
+        "Closed automatically for being stale"
+        if stale
+        else f"Resolved by <@{resolver_user_id}>"
+    )
+    return f":white_check_mark: {resolved_by}. Submitted by <@{author_user_id}>."
 
 
 def backend_message_fallback_text(
@@ -145,7 +102,6 @@ async def send_backend_message(
     description: str,
     past_tickets: int,
     client: AsyncWebClient,
-    current_category_tag_id: int | None = None,
     reopened_by: User | None = None,
     display_name: str | None = None,
     profile_pic: str | None = None,
@@ -158,12 +114,11 @@ async def send_backend_message(
     response = await client.chat_postMessage(
         channel=env.slack_ticket_channel,
         text=backend_message_fallback_text(author_user_id, description, reopened_by),
-        blocks=await backend_message_blocks(
+        blocks=backend_message_blocks(
             author_user_id=author_user_id,
             msg_ts=msg_ts,
             description=description,
             past_tickets=past_tickets,
-            current_category_tag_id=current_category_tag_id,
             reopened_by=reopened_by,
         ),
         username=display_name,
@@ -190,3 +145,39 @@ async def send_backend_message(
                 f"Failed to post original question in ticket thread ticket_ts={ticket_ts}: {e.response['error']}"
             )
     return response
+
+
+async def post_reopen_message(
+    client: AsyncWebClient,
+    ticket_ts: str,
+    msg_ts: str,
+    description: str,
+    reopened_by: User,
+):
+    """Posts a reply in the ticket's existing thread, also sent to the channel,
+    so helpers notice the reopened ticket without starting a new thread."""
+    await client.chat_postMessage(
+        channel=env.slack_ticket_channel,
+        thread_ts=ticket_ts,
+        reply_broadcast=True,
+        text=f":repeat: Reopened by <@{reopened_by.slack_id}>: {question_preview(description)} <{help_thread_url(msg_ts)}|View thread>",
+        metadata={
+            "event_type": REOPEN_MESSAGE_EVENT_TYPE,
+            "event_payload": {"msg_ts": msg_ts},
+        },
+        unfurl_links=False,
+        unfurl_media=False,
+    )
+
+
+async def delete_reopen_messages(client: AsyncWebClient, ticket_ts: str):
+    """Deletes the "reopened" replies posted by `post_reopen_message` in a ticket's thread"""
+    response = await client.conversations_replies(
+        channel=env.slack_ticket_channel,
+        ts=ticket_ts,
+        include_all_metadata=True,
+        limit=200,
+    )
+    for message in response.get("messages", []):
+        if message.get("metadata", {}).get("event_type") == REOPEN_MESSAGE_EVENT_TYPE:
+            await client.chat_delete(channel=env.slack_ticket_channel, ts=message["ts"])

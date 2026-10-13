@@ -63,7 +63,8 @@ async def assign_category_tag_callback(
     if not ticket.opened_by:
         logging.error(f"Cannot find who opened ticket ticket_id={ticket.id}")
         return
-    # Update the backend message so it has the new tag selected
+    # Re-render the backend message (only tickets posted before the tag
+    # dropdowns were removed can still trigger this)
     await client.chat_update(
         channel=channel_id,
         ts=ts,
@@ -72,12 +73,11 @@ async def assign_category_tag_callback(
             description=ticket.description,
             reopened_by=ticket.reopened_by,
         ),
-        blocks=await backend_message_blocks(
+        blocks=backend_message_blocks(
             author_user_id=ticket.opened_by.slack_id,
             msg_ts=ticket.msg_ts,
             description=ticket.description,
             past_tickets=other_tickets,
-            current_category_tag_id=tag_id,
             reopened_by=ticket.reopened_by,
         ),
     )
