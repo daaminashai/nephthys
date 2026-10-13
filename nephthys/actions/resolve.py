@@ -22,6 +22,7 @@ from nephthys.events.message.send_backend_message import (
 )
 from nephthys.utils.env import env
 from nephthys.utils.logging import send_heartbeat
+from nephthys.utils.no_ping import strip_pings
 from nephthys.utils.permissions import can_resolve
 from nephthys.utils.ticket_methods import reply_to_ticket
 from nephthys.utils.ticket_summary import generate_ticket_summary
@@ -168,7 +169,7 @@ async def resolve(
             author_slack_id=tkt.opened_by.slack_id,
         )
         or tkt.title
-        or question_preview(tkt.description)
+        or question_preview(await strip_pings(tkt.description))
         or "Resolved ticket"
     )
     try:
@@ -181,7 +182,7 @@ async def resolve(
         await client.chat_postMessage(
             channel=env.slack_ticket_channel,
             thread_ts=tkt.ticket_ts,
-            text=resolved_thread_message_text(
+            text=await resolved_thread_message_text(
                 author_user_id=tkt.opened_by.slack_id,
                 resolver_user_id=resolving_user.slack_id,
                 stale=stale,

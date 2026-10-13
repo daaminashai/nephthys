@@ -68,12 +68,12 @@ async def assign_category_tag_callback(
     await client.chat_update(
         channel=channel_id,
         ts=ts,
-        text=backend_message_fallback_text(
+        text=await backend_message_fallback_text(
             author_user_id=ticket.opened_by.slack_id,
             description=ticket.description,
             reopened_by=ticket.reopened_by,
         ),
-        blocks=backend_message_blocks(
+        blocks=await backend_message_blocks(
             author_user_id=ticket.opened_by.slack_id,
             msg_ts=ticket.msg_ts,
             description=ticket.description,

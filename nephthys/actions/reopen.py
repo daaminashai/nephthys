@@ -63,10 +63,10 @@ async def reopen(ticket: Ticket, reopened_by: User, client: AsyncWebClient):
         await env.slack_client.chat_update(
             channel=env.slack_ticket_channel,
             ts=ticket.ticket_ts,
-            text=backend_message_fallback_text(
+            text=await backend_message_fallback_text(
                 author.slack_id, ticket.description, reopened_by
             ),
-            blocks=backend_message_blocks(
+            blocks=await backend_message_blocks(
                 author_user_id=author.slack_id,
                 msg_ts=ticket.msg_ts,
                 description=ticket.description,
