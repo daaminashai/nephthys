@@ -12,12 +12,15 @@ from slack_sdk.web.async_client import AsyncWebClient
 from nephthys.database.enums import TicketStatus
 from nephthys.database.tables import Ticket
 from nephthys.database.tables import User
-from nephthys.utils.delete_thread import add_thread_to_delete_queue
+from nephthys.events.message.send_backend_message import question_preview
+from nephthys.events.message.send_backend_message import (
+    resolved_backend_message_blocks,
+)
 from nephthys.utils.env import env
 from nephthys.utils.logging import send_heartbeat
 from nephthys.utils.permissions import can_resolve
-from nephthys.utils.ticket_methods import delete_message
 from nephthys.utils.ticket_methods import reply_to_ticket
+from nephthys.utils.ticket_summary import generate_ticket_summary
 
 THREAD_CREDIT_CUTOFF = timedelta(hours=48)
 
@@ -88,7 +91,7 @@ async def resolve(
         }
     ).where(Ticket.msg_ts == ts)
 
-    tkt = await Ticket.objects().where(Ticket.msg_ts == ts).first()
+    tkt = await Ticket.objects(Ticket.opened_by).where(Ticket.msg_ts == ts).first()
     if not tkt:
         await send_heartbeat(
             f"Failed to resolve ticket with ts {ts} by {resolver}. Ticket not found.",
@@ -151,13 +154,35 @@ async def resolve(
             f"Failed to remove thinking reaction from ticket with ts {ts}: {e.response['error']}"
         )
 
-    if await env.workspace_admin_available():
-        await add_thread_to_delete_queue(
-            channel_id=env.slack_ticket_channel, thread_ts=tkt.ticket_ts
+    # Keep the thread in the tickets channel (helper discussion is worth saving)
+    # and turn its top message into a summary of the resolved ticket
+    summary = (
+        await generate_ticket_summary(
+            client,
+            msg_ts=tkt.msg_ts,
+            ticket_ts=tkt.ticket_ts,
+            author_slack_id=tkt.opened_by.slack_id,
         )
-    else:
-        await delete_message(
-            channel_id=env.slack_ticket_channel, message_ts=tkt.ticket_ts
+        or tkt.title
+        or question_preview(tkt.description)
+        or "Resolved ticket"
+    )
+    try:
+        await client.chat_update(
+            channel=env.slack_ticket_channel,
+            ts=tkt.ticket_ts,
+            text=f"Resolved: {summary}",
+            blocks=resolved_backend_message_blocks(
+                author_user_id=tkt.opened_by.slack_id,
+                resolver_user_id=resolving_user.slack_id,
+                msg_ts=tkt.msg_ts,
+                summary=summary,
+                stale=stale,
+            ),
+        )
+    except SlackApiError as e:
+        logging.error(
+            f"Failed to update backend message for ticket with ts {ts}: {e.response['error']}"
         )
 
     logging.info(

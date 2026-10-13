@@ -219,6 +219,7 @@ async def handle_new_question(
         blocks = await backend_message_blocks(
             author_user_id=author_id,
             msg_ts=event["ts"],
+            description=text,
             past_tickets=past_tickets,
             current_category_tag_id=category_tag.id,
         )

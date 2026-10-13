@@ -75,6 +75,7 @@ async def assign_category_tag_callback(
         blocks=await backend_message_blocks(
             author_user_id=ticket.opened_by.slack_id,
             msg_ts=ticket.msg_ts,
+            description=ticket.description,
             past_tickets=other_tickets,
             current_category_tag_id=tag_id,
             reopened_by=ticket.reopened_by,
