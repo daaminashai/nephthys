@@ -14,6 +14,7 @@ from starlette.applications import Starlette
 from nephthys.tasks.close_stale import close_stale_tickets
 from nephthys.tasks.daily_stats import send_daily_stats
 from nephthys.tasks.fulfillment_reminder import send_fulfillment_reminder
+from nephthys.tasks.pending_tickets import send_pending_tickets
 from nephthys.tasks.update_helpers import update_helpers
 from nephthys.utils.delete_thread import process_queue
 from nephthys.utils.env import env
@@ -56,6 +57,9 @@ async def main(_app: Starlette):
         scheduler = AsyncIOScheduler(timezone="Europe/London")
         if env.daily_summary:
             scheduler.add_job(send_daily_stats, "cron", hour=0, minute=0)
+
+        # 2 PM London is a reasonable time of day for helpers in both India and the US
+        scheduler.add_job(send_pending_tickets, "cron", hour=14, minute=0)
 
         scheduler.add_job(
             send_fulfillment_reminder,
